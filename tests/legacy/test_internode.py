@@ -40,6 +40,13 @@ def test_main(args: argparse.Namespace,
     x_pure_rand_e4m3 = per_token_cast_to_fp8(x_pure_rand)
     x_e4m3 = (x_e4m3[0], x_e4m3[1].T.contiguous().T)
     scores = torch.randn((num_tokens, num_experts), dtype=torch.float32, device='cuda').abs() + 1
+    if args.imbalance:
+        if rank == 0:
+            print(f'Applying {args.skew_percent * 100:.1f}% load imbalance...', flush=True)
+        start_idx = int(num_tokens * (1.0 - args.skew_percent))
+        num_repeat = num_tokens - start_idx
+        scores_imbalanced = torch.randn((1, num_experts), dtype=torch.float32, device='cuda').abs() + 1
+        scores[start_idx:, :] = scores_imbalanced.repeat(num_repeat, 1)
     group_scores = scores.view(num_tokens, num_nodes, -1).amax(dim=-1)
     group_idx = torch.topk(group_scores, k=num_topk_groups, dim=-1, sorted=False).indices
     masked_scores = create_grouped_scores(scores, group_idx, num_nodes)
@@ -384,6 +391,9 @@ if __name__ == '__main__':
         help='Pressure test mode. 0: don\'t do pressure test, 1: do pressure test without benchmarks, 2: do pressure test with benchmarks')
     parser.add_argument('--num-experts', type=int, default=256, help='Number of experts (default: 256')
     parser.add_argument('--test-ll-compatibility', action='store_true', help='whether to test compatibility with low-latency kernels')
+    parser.add_argument('--imbalance', action='store_true', help='Activate expert load imbalance.')
+    parser.add_argument('--skew-percent', type=float, default=0.5,
+                        help='Fraction of tokens (0.0 to 1.0) to force into the same imbalanced routing pattern.')
     args = parser.parse_args()
 
     # Set default `num_topk_groups` if not provided

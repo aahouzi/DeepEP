@@ -75,6 +75,11 @@ def test_dispatch_combine(buffer: deep_ep.ElasticBuffer, args: argparse.Namespac
     scores = get_unbalanced_scores(num_tokens, num_experts, buffer.num_ranks, num_topk, args.unbalanced_ratio, args.precise_unbalanced_ratio)
     topk_weights, topk_idx = torch.topk(scores, num_topk, dim=-1, largest=True, sorted=False)
     topk_idx = topk_idx.to(deep_ep.topk_idx_t)
+    if args.same_routing_ratio > 0:
+        g = torch.Generator(device='cuda').manual_seed(args.seed)
+        hot_idx, hot_w = topk_idx[0].clone(), topk_weights[0].clone()
+        sel = torch.rand(num_tokens, device='cuda', generator=g) < args.same_routing_ratio
+        topk_idx[sel], topk_weights[sel] = hot_idx, hot_w
     if args.masked_ratio > 0:
         rand_mask = torch.rand_like(topk_idx, dtype=torch.float)
         topk_idx.masked_fill_(rand_mask < args.masked_ratio, -1)
@@ -594,6 +599,7 @@ if __name__ == '__main__':
     parser.add_argument('--reuse-elastic-buffer', action='store_true', help='Whether to reuse elastic buffer for each test')
     parser.add_argument('--test-first-only', action='store_true', help='Only test the first case')
     parser.add_argument('--unbalanced-ratio', type=float, default=1.0, help='The MoE unbalanced ratio')
+    parser.add_argument('--same-routing-ratio', type=float, default=0.0, help='Fraction of tokens forced to share one topk decision')
     parser.add_argument('--precise-unbalanced-ratio', action='store_true', help='Generate topk index with precise unbalanced ratio')
     parser.add_argument('--masked-ratio', type=float, default=0.0, help='Mask some expert selections')
     parser.add_argument('--dump-profile-traces', type=str, default='', help='Dump profiling trace JSONs')

@@ -44,6 +44,8 @@ def test_main(num_tokens: int,
               num_ranks: int,
               group: dist.ProcessGroup,
               buffer: deep_ep.Buffer,
+              imbalance: bool = False,
+              skew_percent: float = 0.5,
               use_logfmt: bool = False,
               shrink_test: bool = False,
               seed: int = 0):
@@ -68,6 +70,13 @@ def test_main(num_tokens: int,
     x_list.append(torch.randn((num_tokens, hidden), dtype=torch.bfloat16, device='cuda') * 0.1)
 
     scores = torch.randn((num_tokens, num_experts), dtype=torch.float32, device='cuda').abs() + 1
+    if imbalance:
+        if rank == 0:
+            print(f'Applying {skew_percent * 100:.1f}% load imbalance...', flush=True)
+        start_idx = int(num_tokens * (1.0 - skew_percent))
+        num_repeat = num_tokens - start_idx
+        scores_imbalanced = torch.randn((1, num_experts), dtype=torch.float32, device='cuda').abs() + 1
+        scores[start_idx:, :] = scores_imbalanced.repeat(num_repeat, 1)
     topk_idx = torch.topk(scores, num_topk, dim=-1, largest=True, sorted=True)[1]
     topk_idx = topk_idx.to(deep_ep.topk_idx_t)
     topk_weights = torch.randn((num_tokens, num_topk), dtype=torch.float32, device='cuda').abs()
@@ -276,6 +285,8 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
               num_ranks,
               group,
               buffer,
+              imbalance=args.imbalance,
+              skew_percent=args.skew_percent,
               use_logfmt=args.use_logfmt,
               shrink_test=args.shrink_test,
               seed=1)
@@ -292,6 +303,8 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
                              num_ranks,
                              group,
                              buffer,
+                             imbalance=args.imbalance,
+                             skew_percent=args.skew_percent,
                              use_logfmt=args.use_logfmt,
                              seed=seed)
         for _ in range(20):
@@ -303,6 +316,8 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
                              num_ranks,
                              group,
                              buffer,
+                             imbalance=args.imbalance,
+                             skew_percent=args.skew_percent,
                              use_logfmt=args.use_logfmt,
                              seed=seed) == ref_hash, f'Error: seed={seed}'
 
@@ -326,6 +341,9 @@ if __name__ == '__main__':
     parser.add_argument('--use-logfmt', action='store_true', help='Whether to test LogFMT combine')
     parser.add_argument("--pressure-test", action='store_true', help='Whether to do pressure test')
     parser.add_argument("--shrink-test", action='store_true', help='Whether to simulate failure and test shrink mode')
+    parser.add_argument('--imbalance', action='store_true', help='Activate expert load imbalance.')
+    parser.add_argument('--skew-percent', type=float, default=0.5,
+                        help='Fraction of tokens (0.0 to 1.0) to force into the same imbalanced routing pattern.')
     args = parser.parse_args()
 
     num_processes = args.num_processes
